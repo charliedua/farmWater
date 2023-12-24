@@ -1,0 +1,24 @@
+{
+    "storage1": [
+        {
+            "id": 1,
+            "waterLevel": 80
+        },
+        {
+            "id": 2,
+            "waterLevel": 65
+        },
+        {
+            "id": 3,
+            "waterLevel": 50
+        },
+        {
+            "id": 4,
+            "waterLevel": 75
+        },
+        {
+            "id": 5,
+            "waterLevel": 90
+        }
+    ]
+}
