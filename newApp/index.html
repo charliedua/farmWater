@@ -1,37 +1,87 @@
 <!DOCTYPE html>
 <html>
-
-<head>
-    <meta charset='utf-8'>
-    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <title>Game</title>
-    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- <link rel='stylesheet' type='text/css' media='screen' href='style.css'> -->
     <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.x/dist/pixi.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="matter.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-        }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border: 1px solid black;
+        padding: 8px;
+        text-align: left;
+      }
+      th {
+        background-color: #f2f2f2;
+      }
 
-        canvas {
-            display: block;
-            height: 600px;
-        }
+      .stats-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px; /* Adjust the gap as needed */
+        justify-content: center;
+      }
+
+      .stats-table {
+        display: table;
+        width: auto; /* Adjust width as needed, or set to auto */
+        border-collapse: collapse;
+      }
+
+      .stats-table th,
+      .stats-table td {
+        border: 1px solid black;
+        padding: 8px;
+        text-align: left;
+      }
+
+      .column-header {
+        width: 150px; /* Adjust the width as needed */
+      }
+
+      .column-data {
+        width: 200px; /* Adjust the width as needed */
+      }
     </style>
-</head>
 
-<body>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+      }
+
+      canvas {
+        display: block;
+        height: 600px;
+      }
+    </style>
+  </head>
+
+  <body>
     <div id="data"></div>
     <button id="stop">STOP</button>
     <button id="start">START</button>
     <button id="addWater">addWater</button>
-    <div style="height: 600px; width: 100%;">
-        <canvas id="farmStatsChart"></canvas>
+    <div id="statsTable"></div>
+    <!-- <div style="height: 600px; width: 100%">
+      <canvas id="farmStatsChart"></canvas>
+    </div> -->
+    <div style="display: flex; flex-direction: row; width: 80vw;">
+        <div style="width: calc((100vw - 60px)/4); height: 400px;"><canvas id="farmStatsChart"></canvas></div>
+        <div style="width: calc((100vw - 60px)/4); height: 400px;"><canvas id="tankStatsChart"></canvas></div>
+        <div style="width: calc((100vw - 60px)/4); height: 400px;"><canvas id="pipeStatsChart"></canvas></div>
+        <div style="width: calc((100vw - 60px)/4); height: 400px;"><canvas id="lineChartCanvas"></canvas></div>
     </div>
-    <script src='index.js'></script>
-</body>
 
+    <script src="index.js"></script>
+  </body>
 </html>
