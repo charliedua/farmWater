@@ -10,40 +10,54 @@ class Entity {
     }
 }
 
+
 class EvaporationUtils {
-    static calculateEvaporation(
-        currentVolume,
-        temperature,
-        timeDelta,
-        evapRateAt20C
-    ) {
-        // Base evaporation rate at 20°C: evapRateAt20C liters per minute
-        const baseTemperature = 20; // Baseline temperature in °C
-        const evaporationRatePerMinuteAtBaseTemp = evapRateAt20C; // Liters per minute at 20°C
-        const evaporationRatePerSecondAtBaseTemp =
-            evaporationRatePerMinuteAtBaseTemp / 60; // Convert to liters per second
+    /**
+     * Calculates evaporation based on volume, temperature, time, and base evaporation rate.
+     * @param {number} currentVolume - Current volume of water.
+     * @param {number} temperature - Current temperature in °C.
+     * @param {number} timeDelta - Time delta in milliseconds.
+     * @param {number} evapRateAt20C - Evaporation rate at 20°C in liters per minute.
+     * @returns {number} Evaporated water volume.
+     */
+    static calculateEvaporation(currentVolume, temperature, timeDelta, evapRateAt20C) {
+        const baseTemperature = 20;
+        const evaporationRatePerMinuteAtBaseTemp = evapRateAt20C;
+        const evaporationRatePerSecondAtBaseTemp = evaporationRatePerMinuteAtBaseTemp / 60;
 
-        // Adjusting evaporation rate based on current temperature
-        // Assuming linear relationship: increase/decrease by 5% per °C difference from base
-        const temperatureCoefficient = 0.05 * (temperature - baseTemperature);
-        const adjustedEvaporationRatePerSecond =
-            evaporationRatePerSecondAtBaseTemp * (1 + temperatureCoefficient);
+        // Adjusting evaporation rate based on temperature
+        let temperatureCoefficient = 0.05 * (temperature - baseTemperature);
 
-        // Calculate evaporation based on time delta (in milliseconds)
-        const evaporationRate =
-            (adjustedEvaporationRatePerSecond * timeDelta) / 1000; // Convert to liters per millisecond
-        return Math.min(currentVolume, evaporationRate);
+        // Preventing negative or excessively high evaporation rates at extreme temperatures
+        if (temperature < 0) {
+            temperatureCoefficient = Math.max(temperatureCoefficient, -1); // Limiting the reduction to 100%
+        }
+
+        const adjustedEvaporationRatePerSecond = evaporationRatePerSecondAtBaseTemp * (1 + temperatureCoefficient);
+        const evaporationRate = (adjustedEvaporationRatePerSecond * timeDelta) / 1000;
+
+        return Math.min(currentVolume, Math.max(0, evaporationRate)); // Ensure evaporation is not negative
     }
 
+    /**
+     * Calculates moisture evaporation based on temperature and time.
+     * @param {number} temperature - Current temperature in °C.
+     * @param {number} timeDelta - Time delta in milliseconds.
+     * @returns {number} Moisture evaporated.
+     */
     static calculateMoistureEvaporation(temperature, timeDelta) {
         const baseEvaporationRate = 0.05;
         const temperatureFactor = 0.01;
-        const evaporationRatePerDay =
-            baseEvaporationRate + temperature * temperatureFactor;
-        const evaporationRate = evaporationRatePerDay * (timeDelta / 86400000);
-        return evaporationRate;
+        const evaporationRatePerDay = baseEvaporationRate + temperature * temperatureFactor;
+
+        // Handle negative temperature
+        const adjustedEvaporationRatePerDay = temperature < 0 ? baseEvaporationRate : evaporationRatePerDay;
+
+        const evaporationRate = adjustedEvaporationRatePerDay * (timeDelta / 86400000);
+        return Math.max(0, evaporationRate); // Ensure evaporation is not negative
     }
 }
+
 
 class WorldState {
     temperature = 20;
@@ -146,7 +160,7 @@ class Farm extends Entity {
             world.temperature,
             this.#waterOnTop,
             delta,
-            0.5
+            2
         );
         this.#waterOnTop -= evaporatedWater;
         this.#moisture -=
@@ -167,67 +181,60 @@ class Farm extends Entity {
 }
 
 class Pipe extends Entity {
-    #farm;
-    #tank;
+    #farm; // Reference to the farm object
+    #tank; // Reference to the tank object
     #baseFlowRate; // Base flow rate at 20°C in liters per minute
-    #lastFlow; // Amount of water flowed in the last update
-    #temperatureCoefficient; // Percentage increase per degree Celsius
-    #lastKnownTemperature; // Store the last known temperature to calculate current flow rate
+    #temperatureCoefficient; // Percentage increase per degree Celsius over 20°C
+    #lastKnownTemperature; // Stores the last known temperature to calculate the flow rate
+    #isFlowing; // Indicates if water is currently flowing through the pipe
 
-    constructor(farm, tank, baseFlowRate = 300, temperatureCoefficient = 0.01) {
+    constructor(farm, tank, baseFlowRate = 3, temperatureCoefficient = 0.01) {
         super();
         this.#farm = farm;
         this.#tank = tank;
-        this.#baseFlowRate = baseFlowRate; // Set this to the desired flow rate in liters per minute
-        this.#temperatureCoefficient = temperatureCoefficient; // 1% increase per degree Celsius
-        this.#lastFlow = 0;
-        this.#lastKnownTemperature = 20; // Initialize with a default value of 20°C
+        this.#baseFlowRate = baseFlowRate;
+        this.#temperatureCoefficient = temperatureCoefficient;
+        this.#lastKnownTemperature = 20;
+        this.#isFlowing = false; // Initially, there is no flow
+    }
+
+    setBaseFlow(flowRate){
+        this.#baseFlowRate = flowRate;
     }
 
     update(world, delta) {
-        // Update the last known temperature
         this.#lastKnownTemperature = world.temperature;
+        const temperatureDifference = this.#lastKnownTemperature - 20;
+        const adjustedFlowRate = this.#baseFlowRate * (1 + this.#temperatureCoefficient * temperatureDifference);
+        const flowRatePerMillisecond = adjustedFlowRate / 60000;
 
-        // Calculate the temperature difference from the base temperature of 20°C
-        const temperatureDifference = world.temperature - 20;
-        // Adjust the flow rate based on the current temperature
-        const adjustedFlowRate =
-            this.#baseFlowRate *
-            (1 + this.#temperatureCoefficient * temperatureDifference);
-
-        // Convert adjusted flow rate to liters per millisecond, then multiply by delta
-        const flowRatePerMillisecond = adjustedFlowRate / 60000; // There are 60,000 milliseconds in a minute
         let waterToTransfer = flowRatePerMillisecond * delta;
-
-        // Remove water from tank and add to farm based on the calculated water to transfer
         let waterFromTank = this.#tank.removeWater(waterToTransfer);
-        this.#lastFlow = waterFromTank;
+
+        // Update the flowing status based on the water transferred
+        this.#isFlowing = waterFromTank > 0;
+
         this.#farm.addWater(waterFromTank);
     }
 
     getStats() {
-        // Calculate the current flow rate based on the last known temperature
-        const temperatureDifference = this.#lastKnownTemperature - 20;
-        const currentFlowRate = this.#lastFlow > 0 ?
-            this.#baseFlowRate *
-            (1 + this.#temperatureCoefficient * temperatureDifference) : this.#lastFlow;
+        // Calculate the current flow rate only if water is flowing
+        let currentFlowRate = 0;
+        if (this.#isFlowing) {
+            const temperatureDifference = this.#lastKnownTemperature - 20;
+            currentFlowRate = this.#baseFlowRate * (1 + this.#temperatureCoefficient * temperatureDifference);
+        }
 
         return {
             baseFlowRate: this.#baseFlowRate,
             currentFlowRate: currentFlowRate,
-            lastFlow: this.#lastFlow,
             temperature: this.#lastKnownTemperature,
+            isFlowing: this.#isFlowing, // Added to indicate if water is currently flowing
         };
     }
-
-    getPrintString() {
-        // Calculate the current flow rate based on the last delta
-        //   let currentFlowRate = (this.#lastFlow / this.#lastDelta) * 60000; // Convert back to liters per minute
-        //   return `<b>Pipe</b><br />Flowing from Tank to Farm at ${currentFlowRate.toFixed(
-        //     2
-        //   )} L/min<br />`;
-    }
 }
+
+
 
 class ChartManager {
     constructor() {
@@ -250,6 +257,11 @@ class ChartManager {
                         label: labels[1],
                         data: [],
                         borderColor: 'rgb(75, 192, 255)',
+                    },
+                    {
+                        label: labels[2],
+                        data: [],
+                        borderColor: 'rgb(123, 192, 255)',
                     },
                 ]
             },
@@ -291,7 +303,7 @@ class ChartManager {
     }
     
 
-    createBarChart(canvasId, label, labels, max=10) {
+    createBarChart(canvasId, label, labels, max=1.5) {
         let ctx = document.getElementById(canvasId).getContext("2d");
         this.charts[canvasId] = new Chart(ctx, {
             type: "bar",
@@ -324,18 +336,23 @@ class ChartManager {
         let chart = this.charts[canvasId];
         if (chart) {
             chart.data.labels.push(label);
-            if (chart.data.labels.length > 100) chart.data.labels.shift();
+            if (chart.data.labels.length > 500) chart.data.labels.shift();
 
             datas.forEach((data, index) => {
                 chart.data.datasets[index].data.push(data)
-                if(chart.data.datasets[index].data.length > 100) {
+                if(chart.data.datasets[index].data.length > 500) {
                     chart.data.datasets[index].data.shift(); // remove first element of dataset
                 }
             });
 
         }
+    }
 
-        chart.update();
+    updateLineChart(canvasId) {
+        let chart = this.charts[canvasId];
+        if (chart) {
+            chart.update();
+        }
     }
 }
 
@@ -371,8 +388,26 @@ class Game {
             .addEventListener("click", () => this.start());
         document
             .getElementById("addWater")
-            .addEventListener("click", () => this.#tank.addWater(0.2));
-        
+            .addEventListener("click", () => this.#tank.addWater(Number(document.getElementById("waterToAdd").value)));
+
+        document
+            .getElementById('temperatureControl')
+            .addEventListener('input', (e) => {
+                this.#world.setTemperature(e.target.value);
+            });
+            
+        document
+            .getElementById('pipeFlowControl')
+            .addEventListener('input', (e) => {
+                this.#pipe.setBaseFlow(Number(e.target.value))
+            });
+
+        document
+            .getElementById('waterToAdd')
+            .addEventListener('input', (e) => {
+                document.getElementById("waterValue").innerText = e.target.value + "L";
+            });
+
         this.setUpCharts();
     }
 
@@ -383,8 +418,9 @@ class Game {
         document.getElementById("start").setAttribute("disabled", true);
         this.#intervalID = setInterval(() => {
             this.updateCharts();
+            this.chartManager.updateLineChart("lineChartCanvas");
             this.updateStatsTable();
-        }, 200);
+        }, 500);
     }
 
     loop(last_delay) {
@@ -399,6 +435,9 @@ class Game {
         this.#tank.update(this.#world, last_delay);
         this.#pipe.update(this.#world, last_delay);
 
+        const farmStats = this.#farm.getStats();
+        const currentTime = new Date().toLocaleTimeString();
+        this.chartManager.addDataToLineChart("lineChartCanvas", currentTime, [this.#world.temperature, farmStats.moisture, farmStats.waterOnTop]);
 
         let endTime = performance.now();
         let frameTime = endTime - startTime;
@@ -454,36 +493,34 @@ class Game {
                 <tr><td>Current Flow Rate</td><td>${pipeStats.currentFlowRate.toFixed(
                 2
             )} L/min</td></tr>
-                <tr><td>Last Flow</td><td>${pipeStats.lastFlow.toFixed(
-                2
-            )} L</td></tr>
-                <tr><td>Temperature</td><td>${pipeStats.temperature}°C</td></tr>
+                <tr><td>Flowing</td><td>${pipeStats.isFlowing ? "Yes" : "No"}</td></tr>
             </table>
         </div>
     `;
 
         document.getElementById("statsTable").innerHTML = html;
+        
     }
 
     setUpCharts() {
-        this.chartManager.createBarChart("farmStatsChart", "Farm Stats", ["Moisture", "Water on Top"]);
-        this.chartManager.createBarChart("tankStatsChart", "Tank Stats", ["Current Volume"], this.#tank.getStats().capacity + 10);
+        this.chartManager.createBarChart("farmStatsChart", "Farm Stats", ["Moisture"]);
+        this.chartManager.createBarChart("tankStatsChart", "Tank Stats", ["Current Volume", "Water on Top"], this.#tank.getStats().capacity + 10);
         this.chartManager.createBarChart("pipeStatsChart", "Pipe Stats", ["Last Flow", "Current Flow Rate"]);
-        this.chartManager.createLineChart("lineChartCanvas", ["Temperature", "Moisture"]);
+        this.chartManager.createLineChart("lineChartCanvas", ["Temperature", "Moisture", "Water on Top"]);
     }
 
     updateCharts() {
         let farmStats = this.#farm.getStats();
-        this.chartManager.updateChartData("farmStatsChart", [farmStats.moisture, farmStats.waterOnTop]);
+        this.chartManager.updateChartData("farmStatsChart", [farmStats.moisture]);
 
         let tankStats = this.#tank.getStats();
-        this.chartManager.updateChartData("tankStatsChart", [tankStats.currentVolume]);
+        this.chartManager.updateChartData("tankStatsChart", [tankStats.currentVolume, farmStats.waterOnTop]);
 
         let pipeStats = this.#pipe.getStats(this.#world);
         this.chartManager.updateChartData("pipeStatsChart", [pipeStats.lastFlow, pipeStats.currentFlowRate]);
 
-        let currentTime = new Date().toLocaleTimeString();
-        this.chartManager.addDataToLineChart("lineChartCanvas", currentTime, [this.#world.temperature, this.#farm.getStats().moisture]);
+        // let currentTime = new Date().toLocaleTimeString();
+        // this.chartManager.addDataToLineChart("lineChartCanvas", currentTime, [this.#world.temperature, farmStats.moisture, farmStats.waterOnTop]);
     }
 }
 
