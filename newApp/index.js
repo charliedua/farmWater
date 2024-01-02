@@ -60,7 +60,7 @@ class Tank extends Entity {
     constructor(capacity = 100) {
         super();
         this.#capacity = capacity;
-        this.#currentVolume = 30;
+        this.#currentVolume = 0;
     }
 
     addWater(water) {
@@ -110,8 +110,8 @@ class Farm extends Entity {
     constructor() {
         super();
         this.#moisture = 0;
-        this.#waterOnTop = 12;
-        this.#maxMoisture = 0.8;
+        this.#waterOnTop = 0;
+        this.#maxMoisture = 1;
     }
 
     absorb(moistureToAdd) {
@@ -174,7 +174,7 @@ class Pipe extends Entity {
     #temperatureCoefficient; // Percentage increase per degree Celsius
     #lastKnownTemperature; // Store the last known temperature to calculate current flow rate
 
-    constructor(farm, tank, baseFlowRate = 10, temperatureCoefficient = 0.01) {
+    constructor(farm, tank, baseFlowRate = 300, temperatureCoefficient = 0.01) {
         super();
         this.#farm = farm;
         this.#tank = tank;
@@ -208,9 +208,9 @@ class Pipe extends Entity {
     getStats() {
         // Calculate the current flow rate based on the last known temperature
         const temperatureDifference = this.#lastKnownTemperature - 20;
-        const currentFlowRate =
+        const currentFlowRate = this.#lastFlow > 0 ?
             this.#baseFlowRate *
-            (1 + this.#temperatureCoefficient * temperatureDifference);
+            (1 + this.#temperatureCoefficient * temperatureDifference) : this.#lastFlow;
 
         return {
             baseFlowRate: this.#baseFlowRate,
@@ -226,6 +226,116 @@ class Pipe extends Entity {
         //   return `<b>Pipe</b><br />Flowing from Tank to Farm at ${currentFlowRate.toFixed(
         //     2
         //   )} L/min<br />`;
+    }
+}
+
+class ChartManager {
+    constructor() {
+        this.charts = {};
+    }
+
+    createLineChart(canvasId, labels, maxSize = 100) {
+        let ctx = document.getElementById(canvasId).getContext("2d");
+        this.charts[canvasId] = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: labels[0],
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                    },
+                    {
+                        label: labels[1],
+                        data: [],
+                        borderColor: 'rgb(75, 192, 255)',
+                    },
+                ]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    },
+                    x: {
+                        // This option allows the chart to discard old labels if it gets too wide.
+                        // Adapted from Chart.js documentation, adjust accordingly if using another library.
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: maxSize // Limits the number of labels displayed
+                        }
+                    }
+                },
+                // This option is adapted from Chart.js to enable performance optimization.
+                // If you are using another library, please check the corresponding documentation.
+                animation: {
+                    duration: 0 // General animation time
+                },
+                hover: {
+                    animationDuration: 0 // Duration of animations when hovering an item
+                },
+                responsiveAnimationDuration: 0, // Animation duration after a resize
+                elements: {
+                    line: {
+                        tension: 0.4 // Reduces the initial animation tension to make the chart draw faster
+                    },
+                    point:{
+                        radius: 0 // Reduces the radius of the point to make the chart draw faster
+                    }
+                },
+                maintainAspectRatio: false,
+            }
+        });
+    }
+    
+
+    createBarChart(canvasId, label, labels, max=10) {
+        let ctx = document.getElementById(canvasId).getContext("2d");
+        this.charts[canvasId] = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: label,
+                    data: new Array(labels.length).fill(0),
+                    backgroundColor: labels.map(() => `hsl(${Math.random() * 360}, 50%, 50%)`)
+                }],
+            },
+            options: {
+                scales: {
+                    y: { beginAtZero: true, max: max }
+                },
+                animation: false
+            }
+        });
+    }
+
+    updateChartData(canvasId, data) {
+        let chart = this.charts[canvasId];
+        if (chart) {
+            chart.data.datasets[0].data = data;
+            chart.update();
+        }
+    }
+
+    addDataToLineChart(canvasId, label, datas) {
+        let chart = this.charts[canvasId];
+        if (chart) {
+            chart.data.labels.push(label);
+            if (chart.data.labels.length > 100) chart.data.labels.shift();
+
+            datas.forEach((data, index) => {
+                chart.data.datasets[index].data.push(data)
+                if(chart.data.datasets[index].data.length > 100) {
+                    chart.data.datasets[index].data.shift(); // remove first element of dataset
+                }
+            });
+
+        }
+
+        chart.update();
     }
 }
 
@@ -247,10 +357,7 @@ class Game {
         this.#desiredFPS = desiredFPS;
         this.#timePerFrame = 1000 / this.#desiredFPS;
         this.#world = new WorldState();
-        this.historicalData = {
-            temperatures: [],
-            timestamps: []
-        };
+        this.chartManager = new ChartManager();
     }
 
     setup() {
@@ -264,7 +371,7 @@ class Game {
             .addEventListener("click", () => this.start());
         document
             .getElementById("addWater")
-            .addEventListener("click", () => this.#tank.addWater(10));
+            .addEventListener("click", () => this.#tank.addWater(0.2));
         
         this.setUpCharts();
     }
@@ -276,7 +383,8 @@ class Game {
         document.getElementById("start").setAttribute("disabled", true);
         this.#intervalID = setInterval(() => {
             this.updateCharts();
-        }, 100); // Update every second
+            this.updateStatsTable();
+        }, 200);
     }
 
     loop(last_delay) {
@@ -291,7 +399,6 @@ class Game {
         this.#tank.update(this.#world, last_delay);
         this.#pipe.update(this.#world, last_delay);
 
-        this.updateStatsTable();
 
         let endTime = performance.now();
         let frameTime = endTime - startTime;
@@ -359,89 +466,24 @@ class Game {
     }
 
     setUpCharts() {
-        this.farmChart = this.createChart("farmStatsChart", "Farm Stats", [
-            "Moisture",
-            "Water on Top",
-        ]);
-        this.tankChart = this.createChart("tankStatsChart", "Tank Stats", [
-            "Current Volume",
-        ], this.#tank.getStats().capacity + 10);
-        this.pipeChart = this.createChart("pipeStatsChart", "Pipe Stats", [
-            "Last Flow",
-            "Current Flow Rate",
-        ]);
-        this.lineChart = this.createLineChart("lineChartCanvas", "Temperature");
-    }
-
-    createLineChart(canvasId, label) {
-        let ctx = document.getElementById(canvasId).getContext("2d");
-        return new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: this.historicalData.timestamps,
-                datasets: [{
-                    label: label,
-                    data: this.historicalData.temperatures,
-                    borderColor: 'rgb(75, 192, 192)',
-                    tension: 0.1
-                }]
-            },
-            options: {
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            }
-        });
-    }
-
-    createChart(canvasId, label, labels, max=10) {
-        let ctx = document.getElementById(canvasId).getContext("2d");
-        return new Chart(ctx, {
-            type: "bar",
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: label,
-                    data: new Array(labels.length).fill(0),
-                    backgroundColor: labels.map(() => `hsl(${Math.random() * 360}, 50%, 50%)`)
-                }],
-            },
-            options: {
-                scales: {
-                    y: { beginAtZero: true, max: max }
-                },
-                animation: false
-            }
-        });
+        this.chartManager.createBarChart("farmStatsChart", "Farm Stats", ["Moisture", "Water on Top"]);
+        this.chartManager.createBarChart("tankStatsChart", "Tank Stats", ["Current Volume"], this.#tank.getStats().capacity + 10);
+        this.chartManager.createBarChart("pipeStatsChart", "Pipe Stats", ["Last Flow", "Current Flow Rate"]);
+        this.chartManager.createLineChart("lineChartCanvas", ["Temperature", "Moisture"]);
     }
 
     updateCharts() {
         let farmStats = this.#farm.getStats();
-        this.farmChart.data.datasets[0].data = [farmStats.moisture, farmStats.waterOnTop];
-        this.farmChart.update();
+        this.chartManager.updateChartData("farmStatsChart", [farmStats.moisture, farmStats.waterOnTop]);
 
         let tankStats = this.#tank.getStats();
-        this.tankChart.data.datasets[0].data = [tankStats.currentVolume];
-        this.tankChart.update();
+        this.chartManager.updateChartData("tankStatsChart", [tankStats.currentVolume]);
 
         let pipeStats = this.#pipe.getStats(this.#world);
-        this.pipeChart.data.datasets[0].data = [pipeStats.lastFlow, pipeStats.currentFlowRate];
-        this.pipeChart.update();
+        this.chartManager.updateChartData("pipeStatsChart", [pipeStats.lastFlow, pipeStats.currentFlowRate]);
 
         let currentTime = new Date().toLocaleTimeString();
-        this.historicalData.timestamps.push(currentTime);
-        this.historicalData.temperatures.push(this.#world.temperature);
-
-        // Keep only the last 10 data points
-        if (this.historicalData.timestamps.length > 100) {
-            this.historicalData.timestamps.shift(); // Remove the oldest timestamp
-            this.historicalData.temperatures.shift(); // Remove the oldest temperature data
-        }
-
-        // Update the chart with new data
-        this.lineChart.update();
+        this.chartManager.addDataToLineChart("lineChartCanvas", currentTime, [this.#world.temperature, this.#farm.getStats().moisture]);
     }
 }
 
